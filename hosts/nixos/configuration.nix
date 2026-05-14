@@ -16,6 +16,15 @@
   networking.hostName = "nixos";
   networking.networkmanager.enable = true;
 
+  nix.gc = {
+    automatic = true;
+    dates = "weekly";
+    options = "--delete-older-than 14d";
+  };
+  nix.settings.auto-optimise-store = true;
+  # and cap boot menu entries:
+  boot.loader.systemd-boot.configurationLimit = 10;  # or grub equivalent
+
   time.timeZone = "Europe/Berlin";
 
   i18n.defaultLocale = "en_US.UTF-8";
