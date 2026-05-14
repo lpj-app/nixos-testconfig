@@ -62,6 +62,8 @@
   ];
 
   home-manager = {
+    useGlobalPkgs = true;
+    useUserPackages = true;
     extraSpecialArgs = { inherit inputs; };
     backupFileExtension = "hm-backup";
     users.lpj = import ../../users/lpj/home.nix;
