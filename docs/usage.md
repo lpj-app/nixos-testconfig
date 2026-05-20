@@ -1,6 +1,6 @@
 Rebuild with specified host config:
 ```bash
-sudo nixos-rebuild switch --flake /etc/nixos#nixos
+sudo nixos-rebuild switch --flake /<path-to-config-folder>#nixos
 ```
 
 Layout:
