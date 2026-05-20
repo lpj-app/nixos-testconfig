@@ -78,7 +78,13 @@
     users.lpj = import ../../users/lpj/home.nix;
   };
 
-  services.openssh.enable = true;
+  services.openssh = {
+    enable = true;
+    #settings.PermitRootLogin = false;
+    #settings.PasswordAuthentication = false;
+    #settings.KbdInteractiveAuthentication = false;
+  };
+
   networking.firewall.allowedTCPPorts = [ 22 ];
 
   system.stateVersion = "25.11";
