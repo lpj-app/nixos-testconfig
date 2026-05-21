@@ -46,7 +46,34 @@
   services.xserver.enable = true;
   services.displayManager.sddm.enable = true;
   services.desktopManager.plasma6.enable = true;
-  programs.hyprland.enable = true;
+  
+  # Default hyprland config
+  #programs.hyprland.enable = true;
+
+  # Nvidia hyprland config
+  programs.hyprland = {
+    enable = true;
+    xwayland.enable = true;
+  };
+
+  environment.sessionVariables = {
+    #If your cursor becomes invisible
+    WLR_NO_HARDWARE_CURSORS = "1";
+    #Hint electron apps to use wayland
+    NIXOS_OZONE_WL = "1";
+  };
+
+  hardware = {
+    # Opengl
+    graphics.enable = true;
+
+    # Most wayland compositors need this
+    nvidia.modesetting.enable = true;
+  };
+
+  xdg.portal.enable = true;
+  xdg.portal.extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
+
 
   services.xserver.xkb = {
     layout = "de";
@@ -71,7 +98,17 @@
 
   environment.systemPackages = with pkgs; [
     waybar
-    ewww
+    eww
+    dunst
+    libnotify
+    awww
+    kitty
+    wofi
+
+    (pkgs.waybar.overrideAttrs (oldAttrs: {
+      mesonFlags = oldAttrs.mesonFlags ++ [ "-Dexperimental=true" ];
+      })
+    )
   ];
 
   home-manager = {
