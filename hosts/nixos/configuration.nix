@@ -11,6 +11,9 @@
   boot.loader.grub.device = "/dev/sda";
   boot.loader.grub.useOSProber = true;
 
+  # Removes all users from the system except for the ones defined in home-manager config
+  users.mutableUsers = false;
+
   nix.settings.experimental-features = [ "nix-command" "flakes" ];
 
   networking.hostName = "nixos";
@@ -19,7 +22,7 @@
   nix.gc = {
     automatic = true;
     dates = "weekly";
-    options = "--delete-older-than 14d";
+    options = "--delete-older-than 7d";
   };
   nix.settings.auto-optimise-store = true;
   # and cap boot menu entries:
@@ -67,7 +70,8 @@
   nixpkgs.config.allowUnfree = true;
 
   environment.systemPackages = with pkgs; [
-    git
+    waybar
+    ewww
   ];
 
   home-manager = {
@@ -80,9 +84,9 @@
 
   services.openssh = {
     enable = true;
-    #settings.PermitRootLogin = false;
-    #settings.PasswordAuthentication = false;
-    #settings.KbdInteractiveAuthentication = false;
+    settings.PermitRootLogin = "no";
+    settings.PasswordAuthentication = false;
+    settings.KbdInteractiveAuthentication = false;
   };
 
   networking.firewall.allowedTCPPorts = [ 22 ];

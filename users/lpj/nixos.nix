@@ -1,6 +1,10 @@
 { pkgs, inputs, ... }:
 
 {
+  users.users.root = {
+    hashedPassword = "$y$j9T$U.OsKHKNSQc17zW6flJCl1$XbqUsDbLm.TgDOap7YYsVuSw5Sge9R.khYEzhyOtd17";
+  };
+
   users.users.lpj = {
     isNormalUser = true;
     home = "/home/lpj";
