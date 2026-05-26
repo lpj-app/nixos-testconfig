@@ -6,10 +6,14 @@
     ../../users/lpj/nixos.nix
   ];
 
-  # Bootloader.
-  boot.loader.grub.enable = true;
-  boot.loader.grub.device = "/dev/sda";
-  boot.loader.grub.useOSProber = true;
+  # Bootloader legacy
+  #boot.loader.grub.enable = true;
+  #boot.loader.grub.device = "/dev/sda";
+  #boot.loader.grub.useOSProber = true;
+
+  # Bootloader UEFi
+  boot.loader.systemd-boot.enable = true;
+  boot.loader.efi.canTouchEfiVariables = true;
 
   # Removes all users from the system except for the ones defined in home-manager config
   users.mutableUsers = false;
