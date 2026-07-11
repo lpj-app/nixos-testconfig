@@ -13,6 +13,7 @@
       "wheel"
     ];
     shell = pkgs.bash;
+    # Hashed test password: testuser123
     hashedPassword = "$y$j9T$hMhFOQm8iVBQLX1wOBr6i1$zxLvUO3rZFqzw9reEOmgPOa8niVKZMVmRvUDzjYtFRD";
     openssh.authorizedKeys.keys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO4VkrL2AxOhWqGJ33piWD7dsT2svlAMhvHpP67wKLg7 lucapascal2402@gmail.com"
