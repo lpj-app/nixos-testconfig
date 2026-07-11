@@ -2,7 +2,7 @@
 
 {
   imports = [
-    ./hardware/vm_x86_64-hyperv.nix
+    /etc/nixos/hardware-configuration.nix
     ../../users/lpj/nixos.nix
   ];
 

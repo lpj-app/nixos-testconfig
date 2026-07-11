@@ -1,5 +1,5 @@
 # Default Connectivity for Nix hosts
-NIXADDR ?= 192.168.0.38
+NIXADDR ?= 192.168.0.103
 NIXPORT ?= 22
 NIXUSER ?= root
 
@@ -26,18 +26,18 @@ UNAME := $(shell uname)
 # To test if the config changes are valid, use `make check`. To "demo" the config without adding it to the 
 # bootloader, run `make test`
 switch:
-	sudo nixos-rebuild switch --flake ".#${NIXNAME}"
+	sudo nixos-rebuild switch --flake ".#${NIXNAME}" --impure
 
 # check config. This command will validate the whole config including all systems. To "demo" the config without
 # adding it to the bootloader, run `make test`
 check:
-	nix flake check
+	nix flake check --impure
 
 # test config. This command will build the selected system config and switch to the new state WITHOUT adding
 # the result to the bootloader selector. After rebooting, the system will return to the last "switched" state.
 # Use `make switch` to add a change permanently.
 test:
-	sudo nixos-rebuild test --flake ".#${NIXNAME}"
+	sudo nixos-rebuild test --flake ".#${NIXNAME}" --impure
 
 # bootstrap a new VM. The VM should have booted the most recent ISO drive and its root user password
 # set to "root". This command will create a partition schema and install nixos. Afterwards, the
@@ -108,7 +108,7 @@ vm/copy:
 # to update the config directory.
 vm/switch:
 	ssh -tt $(SSH_OPTIONS) -p$(NIXPORT) $(NIXUSER)@$(NIXADDR) " \
-		sudo NIXPKGS_ALLOW_UNSUPPORTED_SYSTEM=1 nixos-rebuild switch --flake \"/nix-config#${NIXNAME}\" \
+		sudo NIXPKGS_ALLOW_UNSUPPORTED_SYSTEM=1 nixos-rebuild switch --flake \"/nix-config#${NIXNAME}\" --impure \
 	"
 
 # build config for WSL. This command will build the config for a wsl istance and stores the outputs in
