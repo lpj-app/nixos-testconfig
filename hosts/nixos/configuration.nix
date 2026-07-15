@@ -15,6 +15,34 @@
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
 
+  # Kernel params for silent boot
+  boot.consoleLogLevel = 0;
+  boot.kernelParams = [
+    "quiet"
+    "splash"
+    "boot.shell_on_fail"
+    "loglevel=3"
+    "rd.systemd.show_status=false"
+    "rd.udev.log_level=3"
+    "udev.log_priority=3"
+    "vt.global_cursor_default=0" # Disables blinking cursor on boot
+  ];
+
+  # Enables Plymouth very early in the initrd (ramdisk)
+  boot.initrd.systemd.enable = true;
+  boot.initrd.verbose = false;
+
+  # Disables status messages on console from systemd
+  systemd.settings.Manager = {
+    ShowStatus = "no";
+  };
+
+  boot.plymouth = {
+    enable = true;
+    theme = "default-theme";
+    themePackages = [ (pkgs.callPackage ../../themes/default-theme/default.nix { }) ];
+  };
+
   # Removes all users from the system except for the ones defined in home-manager config
   users.mutableUsers = false;
 
