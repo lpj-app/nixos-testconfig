@@ -20,3 +20,47 @@ fun spinner_refresh_callback() {
   spinner.sprite.SetImage(spinner.image.Rotate(spinner.angle * 3.14159265 / 180));
 }
 Plymouth.SetRefreshFunction(spinner_refresh_callback);
+
+# LUKS password dialog. Without Plymouth.SetDisplayPasswordFunction the splash
+# just spins forever while the initrd waits for the passphrase.
+pass.prompt.image = Image.Text("", 1, 1, 1);
+pass.prompt.sprite = Sprite();
+pass.prompt.sprite.SetZ(100);
+pass.prompt.sprite.SetOpacity(0);
+pass.bullet.image = Image.Text("*", 1, 1, 1);
+pass.baseline = Window.GetY() + Window.GetHeight() / 2 + logo.image.GetHeight() / 2 + 160;
+
+fun pass_callback(prompt_text, bullet_count) {
+  pass.prompt.image = Image.Text(prompt_text, 1, 1, 1);
+  pass.prompt.sprite.SetImage(pass.prompt.image);
+  pass.prompt.sprite.SetX(Window.GetX() + Window.GetWidth() / 2 - pass.prompt.image.GetWidth() / 2);
+  pass.prompt.sprite.SetY(pass.baseline);
+  pass.prompt.sprite.SetOpacity(1);
+
+  total_width = bullet_count * pass.bullet.image.GetWidth();
+  start_x = Window.GetX() + Window.GetWidth() / 2 - total_width / 2;
+  for (i = 0; pass.bullet[i] || i < bullet_count; i++) {
+    if (!pass.bullet[i]) {
+      pass.bullet[i].sprite = Sprite(pass.bullet.image);
+      pass.bullet[i].sprite.SetZ(101);
+    }
+    pass.bullet[i].sprite.SetPosition(
+      start_x + i * pass.bullet.image.GetWidth(),
+      pass.baseline + pass.prompt.image.GetHeight(),
+      101);
+    if (i < bullet_count) {
+      pass.bullet[i].sprite.SetOpacity(1);
+    } else {
+      pass.bullet[i].sprite.SetOpacity(0);
+    }
+  }
+}
+Plymouth.SetDisplayPasswordFunction(pass_callback);
+
+fun pass_normal_callback() {
+  pass.prompt.sprite.SetOpacity(0);
+  for (i = 0; pass.bullet[i]; i++) {
+    pass.bullet[i].sprite.SetOpacity(0);
+  }
+}
+Plymouth.SetDisplayNormalFunction(pass_normal_callback);

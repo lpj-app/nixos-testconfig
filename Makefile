@@ -1,23 +1,38 @@
 # Default Connectivity for Nix hosts
-NIXADDR ?= 192.168.0.103
+NIXADDR ?= 192.168.0.152
 NIXPORT ?= 22
 NIXUSER ?= root
 
+# System name used in config (defined before CONF_LUKS below — it needs it)
+#NIXNAME ?= vm-x86_64-qemu
+NIXNAME ?= laptop
+
 # Default harddrive for Nix host
-NIXHDD ?= /dev/sda
+# To get the right device name run `lsblk` on the host and look for the device with the size matching your drives specs except for the boot drive
+NIXHDD ?= /dev/nvme0n1
+
+# Encrypt root during `make init`. Must match hosts/$(NIXNAME)'s luksEnable,
+# init aborts on a mismatch.
+LUKS ?= true
+
+# luksEnable value read from the target host config, ignoring comment lines.
+CONF_LUKS := $(shell sed -n 's/^[[:space:]]*luksEnable[[:space:]]*=[[:space:]]*\(true\|false\).*/\1/p' hosts/$(NIXNAME)/configuration.nix | head -n1)
 
 # Switch Partition Labels
-PARTION_LABEL := $(if $(filter /dev/nvme0n1,$(NIXHDD)),p,)
+PARTITION_LABEL := $(if $(filter /dev/nvme0n1,$(NIXHDD)),p,)
 
 # Reusable SSH options
-SSH_OPTIONS = -o PubkeyAuthentication=no -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no
+# Option to use pubkey auth to prevent password prompts by passing SSH_KEY=path/to/key, e.g.:
+# make vm/switch SSH_KEY=~/.ssh/id_ed25519
+SSH_KEY_NORM := $(subst \,/,$(SSH_KEY))
+SSH_OPTIONS = -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $(if $(SSH_KEY_NORM),-i $(SSH_KEY_NORM),-o PubkeyAuthentication=no)
 
 # Directory of Makefile
 MAKEFILE_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 
-# System name used in config
-#NIXNAME ?= vm-x86_64-qemu
-NIXNAME ?= nixos
+# Windows: force ssh to resolve next to rsync, or mixing MSYS runtimes
+# (e.g. MSYS2 + Git for Windows) breaks signal handling and rsync dies.
+RSYNC_BINDIR := $(shell dirname "$$(command -v rsync)" 2>/dev/null)
 
 # Switch OS configs
 UNAME := $(shell uname)
@@ -25,97 +40,125 @@ UNAME := $(shell uname)
 # build and switch config. This command will build the selected system config and switch to the new state.
 # To test if the config changes are valid, use `make check`. To "demo" the config without adding it to the 
 # bootloader, run `make test`
-switch:
+conf/switch:
 	sudo nixos-rebuild switch --flake ".#${NIXNAME}" --impure
 
 # check config. This command will validate the whole config including all systems. To "demo" the config without
 # adding it to the bootloader, run `make test`
-check:
+conf/check:
 	nix flake check --impure
 
 # test config. This command will build the selected system config and switch to the new state WITHOUT adding
 # the result to the bootloader selector. After rebooting, the system will return to the last "switched" state.
 # Use `make switch` to add a change permanently.
-test:
+conf/test:
 	sudo nixos-rebuild test --flake ".#${NIXNAME}" --impure
 
-# bootstrap a new VM. The VM should have booted the most recent ISO drive and its root user password
-# set to "root". This command will create a partition schema and install nixos. Afterwards, the
-# host must be rebooted.
-#
-# The partition schema follows the NixOS Manual
-# (see: https://nixos.org/manual/nixos/stable/#sec-installation-manual-partitioning)
-vm/init:
+# Bootstrap a NixOS host from an installer ISO/.img with root password "root".
+# Set NIXADDR/NIXPORT/NIXHDD/NIXNAME first. Partitions, installs, reboots —
+# once it's back up, run `make copy-switch`. Partition schema per the NixOS
+# manual: https://nixos.org/manual/nixos/stable/#sec-installation-manual-partitioning
+init:
+	# safety check: LUKS flag must match what the target host config expects,
+	# so `make init` can't silently encrypt/leave-plaintext the wrong device
+	@if [ "$(LUKS)" = "true" ]; then \
+		[ "$(CONF_LUKS)" = "true" ] || { echo "LUKS=true but hosts/$(NIXNAME)/configuration.nix has luksEnable = $(CONF_LUKS) - aborting"; exit 1; }; \
+	else \
+		[ "$(CONF_LUKS)" != "true" ] || { echo "hosts/$(NIXNAME)/configuration.nix has luksEnable = true but LUKS=true was not passed - aborting"; exit 1; }; \
+	fi
 	# create partition schema
-	ssh $(SSH_OPTIONS) -p$(NIXPORT) root@$(NIXADDR) " \
-		parted $(NIXHDD) -- mklabel gpt; \
-		parted $(NIXHDD) -- mkpart root ext4 512MB -8GB; \
-		parted $(NIXHDD) -- mkpart swap linux-swap -8GB 100%; \
-		parted $(NIXHDD) -- mkpart ESP fat32 1MB 512MB; \
-		parted $(NIXHDD) -- set 3 esp on; \
+	# tear down any leftovers from a previous (interrupted) run first, so this
+	# can be re-run without manual cleanup on the installer
+	ssh -tt $(SSH_OPTIONS) -p$(NIXPORT) root@$(NIXADDR) " \
+		set -e; \
+		for _i in 1 2 3 4 5 6 7 8; do \
+			_left=\$$(lsblk -ln -o MOUNTPOINT $(NIXHDD) 2>/dev/null | sed '/^$$/d' | wc -l); \
+			if [ \"\$$_left\" = \"0\" ]; then break; fi; \
+			for _mp in \$$(lsblk -ln -o MOUNTPOINT $(NIXHDD) 2>/dev/null | sed '/^$$/d' | sort -r); do \
+				umount -l \"\$$_mp\" 2>/dev/null || true; \
+			done; \
+			sleep 1; \
+		done; \
+		swapoff -a 2>/dev/null || true; \
+		cryptsetup close cryptroot 2>/dev/null || true; \
 		sleep 1; \
-		mkfs.ext4 -L nixos $(NIXHDD)$(PARTITION_LABEL)1; \
+		_used=\$$(lsblk -ln -o MOUNTPOINT $(NIXHDD) 2>/dev/null | sed '/^$$/d'); \
+		if [ -n \"\$$_used\" ]; then \
+			echo 'ERROR: $(NIXHDD) is still in use - is this actually the live USB that booted?'; \
+			mount | grep '$(NIXHDD)' || true; \
+			lsblk -f $(NIXHDD); \
+			exit 1; \
+		fi; \
+		parted -s $(NIXHDD) -- mklabel gpt; \
+		parted -s $(NIXHDD) -- mkpart root ext4 512MB -8GB; \
+		parted -s $(NIXHDD) -- mkpart swap linux-swap -8GB 100%; \
+		parted -s $(NIXHDD) -- mkpart ESP fat32 1MB 512MB; \
+		parted -s $(NIXHDD) -- set 3 esp on; \
+		sleep 1; \
+		wipefs -a $(NIXHDD)$(PARTITION_LABEL)1 $(NIXHDD)$(PARTITION_LABEL)2 $(NIXHDD)$(PARTITION_LABEL)3 2>/dev/null || true; \
+		if [ "$(LUKS)" = "true" ]; then \
+			cryptsetup luksFormat --batch-mode $(NIXHDD)$(PARTITION_LABEL)1; \
+			cryptsetup open $(NIXHDD)$(PARTITION_LABEL)1 cryptroot; \
+			mkfs.ext4 -L nixos /dev/mapper/cryptroot; \
+		else \
+			mkfs.ext4 -L nixos $(NIXHDD)$(PARTITION_LABEL)1; \
+		fi; \
 		mkswap -L swap $(NIXHDD)$(PARTITION_LABEL)2; \
 		mkfs.fat -F 32 -n boot $(NIXHDD)$(PARTITION_LABEL)3; \
 		sleep 1; \
-		mount /dev/disk/by-label/nixos /mnt; \
+		if [ "$(LUKS)" = "true" ]; then \
+			mount /dev/mapper/cryptroot /mnt; \
+		else \
+			mount $(NIXHDD)$(PARTITION_LABEL)1 /mnt; \
+		fi; \
 		mkdir -p /mnt/boot; \
-		mount -o umask=077 /dev/disk/by-label/boot /mnt/boot; \
+		mount -o umask=077 $(NIXHDD)$(PARTITION_LABEL)3 /mnt/boot; \
 		swapon $(NIXHDD)$(PARTITION_LABEL)2; \
 		sleep 1; \
 		nixos-generate-config --root /mnt; \
 		sleep 1; \
-		sed --in-place '/system\.stateVersion = .*/a \
-			nix.package = pkgs.nixVersions.latest;\n \
-			nix.extraOptions = \"experimental-features = nix-command flakes\";\n \
-  		services.openssh.enable = true;\n \
-			services.openssh.settings.PasswordAuthentication = true;\n \
-			services.openssh.settings.PermitRootLogin = \"yes\";\n \
-			users.users.root.initialPassword = \"root\";\n \
-		' /mnt/etc/nixos/configuration.nix; \
+		if ! grep -q 'nix.package' /mnt/etc/nixos/configuration.nix; then \
+			sed --in-place '/system\.stateVersion = .*/a \
+				nix.package = pkgs.nixVersions.latest;\n \
+				nix.extraOptions = \"experimental-features = nix-command flakes\";\n \
+				services.openssh.enable = true;\n \
+				services.openssh.settings.PasswordAuthentication = true;\n \
+				services.openssh.settings.PermitRootLogin = \"yes\";\n \
+				users.users.root.initialPassword = \"root\";\n \
+			' /mnt/etc/nixos/configuration.nix; \
+		fi; \
 		nixos-install --no-root-passwd && reboot; \
 	"
-	# wait until host is back up
-	@until ssh $(SSH_OPTIONS) -p$(NIXPORT) -o ConnectTimeout=5 root@$(NIXADDR) true; do \
-		sleep 2; \
-	done
-	# copy config
-	NIXUSER=root $(MAKE) vm/copy
-	# build config
-	NIXUSER=root $(MAKE) vm/switch
-	# done
+	# done — init stops here. `make copy-switch` must be run manually once the
+	# host has rebooted (and the LUKS passphrase was entered at the console).
 
-# copy keys to VM. This command will copy the .ssh and other key-stores to the vm specified.
-vm/keys:
+# copy keys to target machine. This command will copy the .ssh and other key-stores to the target machine
+keys:
 	# SSH keys
-	rsync -av -e 'ssh $(SSH_OPTIONS)' \
+	PATH="$(RSYNC_BINDIR):$$PATH" rsync -av -e 'ssh $(SSH_OPTIONS)' \
 		--exclude='environment' \
 		--exclude='known_hosts' \
 		--exclude='known_hosts.old' \
 		$(HOME)/.ssh/ $(NIXUSER)@$(NIXADDR):~/.ssh
 
-# copy config to VM. This command will copy all config files from this repo to the vm specified. Git-
-# Checkout branch 'main' for the latest stable version.
-vm/copy:
-	rsync -av -e 'ssh $(SSH_OPTIONS) -p$(NIXPORT)' \
+# copy non exluded config files to target machine
+copy:
+	PATH="$(RSYNC_BINDIR):$$PATH" rsync -av -e 'ssh $(SSH_OPTIONS) -p$(NIXPORT)' \
 		--exclude='.git/' \
 		--exclude='docs/' \
 		--exclude='iso/' \
-		--rsync-path="sudo rsync" \
+		--exclude='local/' \
+		--rsync-path="rsync" \
 		$(MAKEFILE_DIR)/ $(NIXUSER)@$(NIXADDR):/nix-config
 
-# switch config on VM. This command will build the config stored in /vim-config on the vm. Use vm/copy
-# to update the config directory.
-vm/switch:
+# switch config on target machine. 
+# rebuilds the specified and copied config on the target machine and switches to it
+# Automatically generates hardware-configuration.nix if it doesn't exist in default location
+switch:
 	ssh -tt $(SSH_OPTIONS) -p$(NIXPORT) $(NIXUSER)@$(NIXADDR) " \
+		[ -f /etc/nixos/hardware-configuration.nix ] || sudo nixos-generate-config; \
 		sudo NIXPKGS_ALLOW_UNSUPPORTED_SYSTEM=1 nixos-rebuild switch --flake \"/nix-config#${NIXNAME}\" --impure \
 	"
 
-# build config for WSL. This command will build the config for a wsl istance and stores the outputs in
-# ./result/tarball. Copy that to the windows machine and run the follwing commands
-#
-# `wsl --import nixos .\nixos .\path\to\nixos\tarball.tar.gz`
-#
-#	`wsl -d nixos`
-wsl:
-	nix build ".#nixosConfigurations.wsl.config.system.build.tarballBuilder"
+copy-switch: copy switch
+
