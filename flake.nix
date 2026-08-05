@@ -8,6 +8,20 @@
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # Raw dotfiles only — upstream's flake targets non-NixOS and doesn't
+    # deploy them; we vendor the tree ourselves via a home-manager module.
+    dots-hyprland = {
+      url = "github:end-4/dots-hyprland";
+      flake = false;
+    };
+
+    # A git submodule of dots-hyprland; github: only fetches tarballs (no
+    # submodules), so it's pulled separately and symlinked in by the hyprland module.
+    dots-hyprland-shapes = {
+      url = "github:end-4/rounded-polygon-qmljs";
+      flake = false;
+    };
   };
 
   outputs = { self, nixpkgs, ... }@inputs:
