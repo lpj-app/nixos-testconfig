@@ -4,7 +4,6 @@ NIXPORT ?= 22
 NIXUSER ?= root
 
 # System name used in config (defined before CONF_LUKS below — it needs it)
-#NIXNAME ?= vm-x86_64-qemu
 NIXNAME ?= laptop
 
 # Default harddrive for Nix host
@@ -16,7 +15,13 @@ NIXHDD ?= /dev/nvme0n1
 LUKS ?= true
 
 # luksEnable value read from the target host config, ignoring comment lines.
-CONF_LUKS := $(shell sed -n 's/^[[:space:]]*luksEnable[[:space:]]*=[[:space:]]*\(true\|false\).*/\1/p' hosts/$(NIXNAME)/configuration.nix | head -n1)
+# (No sed backreferences here — GNU Make's $(shell) on this box silently
+# empties any \(...\) capture group, so extraction goes through grep -oE.)
+CONF_LUKS := $(shell grep -oE 'luksEnable[[:space:]]*=[[:space:]]*(true|false)' hosts/$(NIXNAME)/configuration.nix | grep -oE '(true|false)$$' | head -n1)
+
+# --include for the user being deployed, expanded into `copy`'s rsync call
+# below. NIXUSER is already the account this host is being built for
+USER_INCLUDES := --include='users/$(NIXUSER)/' --include='users/$(NIXUSER)/**'
 
 # Switch Partition Labels
 PARTITION_LABEL := $(if $(filter /dev/nvme0n1,$(NIXHDD)),p,)
@@ -142,12 +147,22 @@ keys:
 		$(HOME)/.ssh/ $(NIXUSER)@$(NIXADDR):~/.ssh
 
 # copy non exluded config files to target machine
+# Only hosts/$(NIXNAME) and users/$(NIXUSER) go out — every other host's and
+# user's config stays local. Include rules must come before the broader
+# hosts/*, users/* excludes: rsync matches top-down and stops at the first hit.
 copy:
 	PATH="$(RSYNC_BINDIR):$$PATH" rsync -av -e 'ssh $(SSH_OPTIONS) -p$(NIXPORT)' \
 		--exclude='.git/' \
 		--exclude='docs/' \
+		--exclude="scripts/" \
 		--exclude='iso/' \
 		--exclude='local/' \
+		--exclude='.ssh/' \
+		--include='hosts/$(NIXNAME)/' \
+		--include='hosts/$(NIXNAME)/**' \
+		--exclude='hosts/*/' \
+		$(USER_INCLUDES) \
+		--exclude='users/*/' \
 		--rsync-path="rsync" \
 		$(MAKEFILE_DIR)/ $(NIXUSER)@$(NIXADDR):/nix-config
 
