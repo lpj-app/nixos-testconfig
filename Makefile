@@ -137,6 +137,11 @@ init:
 	# done — init stops here. `make copy-switch` must be run manually once the
 	# host has rebooted (and the LUKS passphrase was entered at the console).
 
+# generate a new ed25519 SSH key in this repo's .ssh/ folder, filename prompted
+keys-generate:
+	@mkdir -p $(MAKEFILE_DIR)/.ssh
+	@printf "Key filename: "; read name; ssh-keygen -t ed25519 -f "$(MAKEFILE_DIR)/.ssh/$$name"
+
 # copy keys to target machine. This command will copy the .ssh and other key-stores to the target machine
 keys:
 	# SSH keys
