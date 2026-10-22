@@ -182,3 +182,29 @@ switch:
 
 copy-switch: copy switch
 
+# copy non excluded config files within the same machine, e.g. from this repo
+# checkout into /nix-config. Same include/exclude rules as `copy`, just without
+# going over ssh/rsync-to-remote - useful when you're already on the target host.
+local-copy:
+	rsync -av \
+		--exclude='.git/' \
+		--exclude='docs/' \
+		--exclude="scripts/" \
+		--exclude='iso/' \
+		--exclude='local/' \
+		--exclude='.ssh/' \
+		--include='hosts/$(NIXNAME)/' \
+		--include='hosts/$(NIXNAME)/**' \
+		--exclude='hosts/*/' \
+		$(USER_INCLUDES) \
+		--exclude='users/*/' \
+		$(MAKEFILE_DIR)/ /nix-config
+
+# switch config locally, using the copy already placed at /nix-config.
+# Automatically generates hardware-configuration.nix if it doesn't exist in default location
+local-switch:
+	[ -f /etc/nixos/hardware-configuration.nix ] || sudo nixos-generate-config
+	cd /nix-config && sudo NIXPKGS_ALLOW_UNSUPPORTED_SYSTEM=1 nixos-rebuild switch --flake ".#${NIXNAME}" --impure
+
+local-copy-switch: local-copy local-switch
+
