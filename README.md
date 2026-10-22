@@ -1,8 +1,51 @@
 # nixos-testconfig
 
+<img src="assets/deployment-tool.png" alt="Nix-Deployment" width="1200" />
+
 Flake-based NixOS config for a handful of personal machines — a laptop and a
 desktop running Hyprland — bootstrapped and deployed remotely over SSH via
 `make`, rather than edited by hand on each box.
+
+## Deployment Tool
+
+This repo includes a local web UI that wraps the same `make` workflows used for
+bootstrap and deployment. It is meant to make host setup, deploys, status checks,
+mesh-key handling, and new-host generation easier from a browser without
+bypassing the Makefile logic that defines the real deployment behavior.
+
+Usage:
+
+```bash
+cd nixos-testconfig
+python3 deployment-tool/server.py
+# → Deployment tool: http://127.0.0.1:8765/#token=...
+```
+
+The printed token is used in the browser session. The tool runs the repo's real
+`make` targets and streams the live output back to the UI. It is designed for:
+
+- connecting to a host or VM over SSH
+- bootstrapping a new machine with `init`
+- deploying changes with `copy`, `switch`, and `copy-switch`
+- checking disk availability and host status
+- managing mesh/WireGuard key data and topology updates
+- creating a new host config from the repo template
+- viewing live log output and canceling a running job
+
+The tool is organized into a few main sections in its UI: connection, deploy,
+install VM, new host, mesh & keys, status, history, and log. The backend is a
+small Python HTTP server that validates input, starts the matching `make`
+operation, and streams stdout/stderr to the browser while preserving the
+original Makefile-driven workflow.
+
+This is the practical local interface for the operational flow described in the
+repo docs, without replacing the actual deployment logic in `Makefile` or the
+Nix configuration itself.
+
+> Note: the deployment tool is a standalone operational component and runs under
+> a proprietary license independent from the Nix configuration repository. It is
+> owned by Luca Pascal Junge / LPJ IT-Solutions and is not part of the public
+> open-source license scope of the repository itself.
 
 ## Table of Contents
 
