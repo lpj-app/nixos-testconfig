@@ -14,6 +14,29 @@ desktop running Hyprland — bootstrapped and deployed remotely over SSH via
 6. [Boot splash (Plymouth)](#6-boot-splash-plymouth)
 7. [Known limitations](#7-known-limitations)
 
+---
+
+Most usable config: **standard-device**
+
+This is the default baseline for a real personal workstation and the config that usually needs the least extra cleanup for a new host bootstrap. It already contains the full desktop feature set, the standard developer tools, and the expected system defaults, but a new host still needs a few custom values to be filled in before it is fully personal to that machine.
+
+For a new host/bootstrap, the following items must usually be customized:
+
+- Hostname and machine identity: set the host name in the host configuration under `hosts/<name>/configuration.nix`, including `networking.hostName` and any machine-specific local settings.
+- Custom user account: create or adjust the user definition under `users/<name>/nixos.nix` and make sure the username, groups, SSH keys, password/hash, and sudo access match the target machine.
+- Home Manager profile: configure the matching user profile under `users/<name>/home.nix` or the host-specific home file, including packages, dotfiles, Hyprland settings, and any machine-local desktop preferences.
+- Network interface naming and wiring: set the correct interface name and network config for the target machine, including DHCP or static config, VLANs, and any default interface assumptions.
+- WireGuard / VPN interface: define the custom WG interface name, private keys, peer addresses, allowed IPs, and endpoint settings for the actual network layout used by the host.
+- Host-specific hardware assumptions: monitor layout, graphics setup, GPU device configuration, audio, Bluetooth, and any machine-specific NixOS service toggles.
+- Software selection: keep only the apps that belong to this device, but the standard setup usually includes utilities such as `gnumake`, `nodejs`, `git`, `gh`, `obsidian`, `tor-browser`, `firefox-devedition`, `keepass`, `spotify`, `vscode`, `docker`, `claude-code`, `libreoffice`, `thunderbird`, `remmina`, `imagemagick`, `unzip`, `python3`, and the common desktop tooling expected on a daily workstation.
+- Boot and display defaults: SDDM, Hyprland, Plymouth, and any session variables that only make sense for the target device.
+
+> So this is the most complete and usable base config, but a new host still needs the 
+> usual host-specific customizations for hostname, user identity, network/WireGuard 
+> interface, and any device-specific hardware or desktop behavior.
+
+---
+
 ## 1. Repository layout
 
 ```
