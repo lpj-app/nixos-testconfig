@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nix-Deployment</title>
+  <link rel="icon" href="/favicon.png">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="/logo.png" alt="Nix-Deployment" class="brand-logo">
+      <div>
+        <div class="brand-title">Nix-Deployment</div>
+        <div class="brand-sub" id="repo">nixos-testconfig</div>
+      </div>
+    </div>
+    <div class="token" id="token-box" hidden>
+      <label>Token <input id="token-input" type="password" autocomplete="off" placeholder="from the console"></label>
+      <button id="token-save" class="btn">Connect</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="col">
+      <form class="card" id="conn" autocomplete="off">
+        <h2>Connection</h2>
+        <div class="grid">
+          <label>Profile
+            <select id="profile"><option value="">– new –</option></select>
+          </label>
+          <label>Host config
+            <select name="NIXNAME" id="host" required></select>
+          </label>
+          <label>Address
+            <input name="NIXADDR" required placeholder="192.168.0.194 or 127.0.0.1 (tunnel)">
+          </label>
+          <label>Port
+            <input name="NIXPORT" type="number" min="1" max="65535" value="22">
+          </label>
+          <label>SSH user
+            <input name="NIXUSER" value="root">
+          </label>
+          <label>SSH key
+            <select name="SSH_KEY" id="keys"><option value="">– password –</option></select>
+          </label>
+          <label>SSH password / key passphrase <span class="hint">this run only, never stored</span>
+            <input id="password" type="password" autocomplete="off">
+          </label>
+          <label>Disk (init only)
+            <input name="NIXHDD" list="disks" value="/dev/vda">
+            <datalist id="disks"></datalist>
+          </label>
+          <label class="check">
+            <input name="LUKS" type="checkbox"> LUKS (must match <code>luksEnable</code>)
+          </label>
+        </div>
+        <details class="jump">
+          <summary>Jump host (VM behind a firewall)</summary>
+          <p class="hint">Every ssh/rsync goes through this host. Address above is then the VM's address as the jump host sees it.</p>
+          <div class="grid">
+            <label>Jump host <input name="JUMP" placeholder="user@vserver.example"></label>
+            <label>Jump port <input name="JUMP_PORT" type="number" min="1" max="65535" value="22"></label>
+            <label>Jump key <select name="JUMP_KEY" id="jump-keys"><option value="">– password –</option></select></label>
+            <label>Jump key passphrase <input id="jump-passphrase" type="password" autocomplete="off"></label>
+            <label>Jump password <input id="jump-password" type="password" autocomplete="off"></label>
+          </div>
+        </details>
+        <div class="row">
+          <input id="profile-name" placeholder="Profile name">
+          <button type="button" class="btn" id="save-profile">Save profile</button>
+          <span class="meta" id="host-meta"></span>
+        </div>
+      </form>
+
+      <nav class="tabs" role="tablist">
+        <button class="tab active" data-tab="deploy">Deploy</button>
+        <button class="tab" data-tab="install">Install VM</button>
+        <button class="tab" data-tab="newhost">New host</button>
+        <button class="tab" data-tab="mesh">Mesh &amp; keys</button>
+        <button class="tab" data-tab="status">Status</button>
+        <button class="tab" data-tab="history">History</button>
+      </nav>
+
+      <div class="card panel" id="tab-deploy">
+        <h2>Roll out configuration</h2>
+        <p>Copies the selected host's configuration to the target and switches to it (<code>make copy-switch</code>).</p>
+        <div class="row">
+          <button class="btn primary" data-run="copy-switch">copy-switch</button>
+          <button class="btn" data-run="copy">copy only</button>
+          <button class="btn" data-run="switch">switch only</button>
+        </div>
+        <p>Check first: <code>check</code> builds the copied config without activating it, <code>test</code> activates it until the next reboot.</p>
+        <div class="row">
+          <button class="btn" data-run="check">check</button>
+          <button class="btn" data-run="test">test</button>
+        </div>
+        <p class="hint">Answer prompts (e.g. <code>sudo</code>) in the log below.</p>
+      </div>
+
+      <div class="card panel" id="tab-install" hidden>
+        <h2>Install a new VM</h2>
+        <ol class="steps">
+          <li>
+            <strong>Pick the disk.</strong> The target must be booted from the NixOS installer.
+            <div class="row"><button class="btn" id="probe">Probe disks</button></div>
+            <table class="table" id="disk-table" hidden><thead><tr><th>Disk</th><th>Size</th><th>Model</th><th></th></tr></thead><tbody></tbody></table>
+          </li>
+          <li>
+            <strong>Install</strong> (<code>make init</code>). <span class="warn">Wipes the disk.</span>
+            <div class="row">
+              <input id="init-confirm" placeholder="Type the host name to confirm">
+              <button class="btn danger" id="run-init">Start init</button>
+            </div>
+          </li>
+          <li>
+            <strong>Set passwords</strong> (<code>make set-password</code>) after the reboot, <code>root</code> first, then <code>lpj</code>. Enter the new password in the log.
+            <div class="row">
+              <select id="pw-user"><option>root</option><option>lpj</option></select>
+              <button class="btn" id="run-setpw">set-password</button>
+            </div>
+          </li>
+          <li>
+            <strong>Install an SSH key</strong> while password login still works: generate one in <code>.ssh/</code> or pick one, install it, then select it under “SSH key” in Connection. Also add it to <code>users/lpj/nixos.nix</code>, servers disable password login after the rollout.
+            <div class="row">
+              <input id="kg-name" placeholder="New key name, e.g. ssh-edge" pattern="[a-z0-9][a-z0-9-]*">
+              <input id="kg-pass" type="password" placeholder="Passphrase (optional)" autocomplete="off">
+              <button class="btn" id="kg-run">Generate</button>
+            </div>
+            <div class="row">
+              <select id="cid-key"></select>
+              <button class="btn" id="cid-run">Install on host</button>
+            </div>
+            <pre class="out" id="keys-out" hidden></pre>
+          </li>
+          <li>
+            <strong>First rollout</strong> (<code>make copy-switch</code>), then the tab “Mesh &amp; keys”.
+            <div class="row"><button class="btn primary" data-run="copy-switch">copy-switch</button></div>
+          </li>
+        </ol>
+      </div>
+
+      <form class="card panel" id="tab-newhost" hidden autocomplete="off">
+        <h2>Create a new host</h2>
+        <p>Writes <code>hosts/&lt;name&gt;/configuration.nix</code> and adds the host to <code>topology.nix</code>. Nothing is committed.</p>
+        <div class="grid">
+          <label>Name <input name="name" required pattern="[a-z0-9][a-z0-9-]*" placeholder="mail"></label>
+          <label>Purpose <input name="purpose" placeholder="why it needs its own VM"></label>
+          <label>LAN IP <input name="lanIp" required placeholder="192.168.0.201"></label>
+          <label>Mesh IP <input name="meshIp" id="next-mesh" required></label>
+          <label>Mesh ports <input name="ports" placeholder="8090, 8091"></label>
+          <label>Postgres databases <input name="postgres" placeholder="mail"></label>
+          <label class="wide">Backup paths <input name="paths" placeholder="/var/lib/mail"></label>
+        </div>
+        <fieldset class="roles"><legend>Modules</legend><div id="roles"></div></fieldset>
+        <div class="row"><button class="btn primary" type="submit">Create host</button></div>
+        <pre class="out" id="newhost-out" hidden></pre>
+      </form>
+
+      <div class="card panel" id="tab-mesh" hidden>
+        <h2>Mesh keys and sops recipients</h2>
+        <p>Uses port, user and key from “Connection”, the address from <code>topology.nix</code>.</p>
+        <table class="table" id="mesh-table">
+          <thead><tr><th>Host</th><th>LAN</th><th>Mesh</th><th>Key</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <pre class="out" id="mesh-out" hidden></pre>
+
+      </div>
+
+      <div class="card panel" id="tab-status" hidden>
+        <h2>Status</h2>
+        <p>NixOS version, current generation, failed units and mesh handshakes of the connected host.</p>
+        <div class="row"><button class="btn" id="status-btn">Check status</button></div>
+        <pre class="out" id="status-out" hidden></pre>
+      </div>
+
+      <div class="card panel" id="tab-history" hidden>
+        <h2>History</h2>
+        <table class="table" id="jobs">
+          <thead><tr><th>Started</th><th>Target</th><th>Host</th><th>Address</th><th>Result</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p class="hint">All logs: <code>.deploy-logs/</code> in the repo.</p>
+      </div>
+    </section>
+
+    <section class="col log-col">
+      <div class="card log-card">
+        <div class="log-head">
+          <h2>Log <span class="meta" id="job-title">no run</span></h2>
+          <button class="btn danger small" id="cancel" disabled>Cancel</button>
+        </div>
+        <pre id="log" class="log" aria-live="polite"></pre>
+        <form class="row send" id="send">
+          <input id="send-text" type="password" placeholder="Reply to the process (e.g. a password)" autocomplete="off">
+          <label class="check small"><input type="checkbox" id="send-show"> show</label>
+          <button class="btn" type="submit">Send</button>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <img src="/logo.png" alt="lpj.app" class="footer-logo">
+    <span>© <span id="year">2026</span> LPJ IT Solutions. All rights reserved.</span>
+  </footer>
+
+  <div class="toast" id="toast" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>

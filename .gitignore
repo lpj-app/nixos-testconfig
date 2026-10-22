@@ -1,3 +1,4 @@
 .ssh
 docs/
 tasks/
+deployment-tool/__pycache__/
