@@ -202,6 +202,30 @@ in
     ];
   };
 
+  # YubiKey/OnlyKey (U2F) as mandatory 2nd factor, test rollout on standard-device.
+  # Register keys as lpj: pamu2fcfg > ~/.config/Yubico/u2f_keys (first key),
+  # then pamu2fcfg -n >> ... for a backup key.
+  #
+  # Global enable defaults EVERY pam service to requiring it, including the
+  # TTY "login" service — excluded below so it stays the recovery path.
+  security.pam.u2f = {
+    enable = true;
+    control = "required"; # both factors required, not "sufficient" (= either/or)
+    settings.cue = true; # prints "Please touch the device"
+  };
+  security.pam.services.login.u2f.enable = false; # TTY console stays password-only (recovery path)
+  security.pam.services.sshd.u2f.enable = false; # moot, PasswordAuthentication is off below; explicit anyway
+
+  # sddm.nix substacks the untouched "login" service for its auth rules, so
+  # the generic u2f.enable option above never reaches it. Add u2f as its own
+  # extra rule instead, after the login substack (order 10100).
+  security.pam.services.sddm.rules.auth.u2f = {
+    order = 10200;
+    control = "required";
+    modulePath = "${pkgs.pam_u2f}/lib/security/pam_u2f.so";
+    settings = config.security.pam.u2f.settings;
+  };
+
   # extraPackages doesn't link into /run/current-system/sw, where SDDM looks
   # for themes — only systemPackages does. bibata-cursors needs to be here
   # too: the greeter runs as its own system user, not lpj/home-manager.
