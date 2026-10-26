@@ -299,6 +299,20 @@ in
         hardcoded "us". Defaults to "us" so plain clones stay untouched.
       '';
     };
+
+    kanshiProfiles = lib.mkOption {
+      type = lib.types.listOf lib.types.attrs;
+      default = [ ];
+      description = ''
+        services.kanshi.settings entries (one `{ profile = { name, outputs }; }`
+        per layout). kanshi watches which outputs are actually plugged in and
+        auto-applies the first matching profile — this is what makes
+        dock/undock (or "only use the second monitor") switch automatically,
+        instead of the static hl.monitor() calls in `monitors`. Left empty by
+        default (kanshi.enable only turns on when non-empty); fill in with
+        real connector/EDID criteria from `hyprctl monitors all`.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -306,7 +320,13 @@ in
       source = "${dotsConfigMerged}/${name}";
       recursive = true;
     }) // {
-      "hypr/monitors.lua".text = cfg.monitors;
+      # kanshi (via wlr-output-management) fully owns monitor layout once
+      # profiles are configured — leave monitors.lua a no-op require() so
+      # hl.monitor() doesn't fight kanshi's own enable/disable/position calls.
+      "hypr/monitors.lua".text =
+        if cfg.kanshiProfiles == [ ]
+        then cfg.monitors
+        else "-- monitor layout managed by kanshi (myHyprland.kanshiProfiles)\n";
 
       # dots-hyprland references this path as a git submodule the github:
       # fetcher never pulls (empty dir upstream, zero files) — see
@@ -322,7 +342,19 @@ in
     # calls fail and it silently regenerates a light scheme.
     dconf.enable = true;
 
+    # Watches which outputs are actually connected and auto-applies the
+    # first matching profile — this is what makes docking/undocking (or
+    # switching to "only the second monitor") happen without manual steps.
+    services.kanshi = lib.mkIf (cfg.kanshiProfiles != [ ]) {
+      enable = true;
+      settings = cfg.kanshiProfiles;
+    };
+
     home.packages = with pkgs; [
+      # GUI to drag/arrange/scale monitors live (Windows-Settings-style),
+      # for ad-hoc layout changes outside the kanshi profiles above.
+      nwg-displays
+
       # Shell + widgets
       quickshell
       matugen
