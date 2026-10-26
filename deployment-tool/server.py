@@ -20,6 +20,13 @@ import threading
 import urllib.parse
 from pathlib import Path
 
+try:  # POSIX only; local-switch's sudo prompt needs a real pty to read from
+    import fcntl
+    import pty
+    import termios
+except ImportError:
+    pty = None
+
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 HOSTS = REPO / "hosts"
@@ -32,7 +39,16 @@ ASSET_DIR = REPO / "assets" / "deployment-tool"
 LOGO = ASSET_DIR / "lpj.app.png"
 FAVICON = ASSET_DIR / "favicon.png"
 
-TARGETS = {"init", "set-password", "copy", "switch", "copy-switch", "check", "test"}
+TARGETS = {"init", "set-password", "copy", "switch", "copy-switch", "check", "test",
+           "local-copy", "local-switch", "local-copy-switch",
+           "u2f-register", "u2f-register-backup", "u2f-check",
+           "local-u2f-register", "local-u2f-register-backup", "local-u2f-check"}
+# These run directly on this machine (no ssh/rsync-to-remote) — only meaningful
+# when the deployment tool itself runs on the target host, e.g. a laptop you're
+# sitting at. local-switch's `sudo nixos-rebuild switch` needs a real local tty
+# to prompt for a password, which is why Job gives these their own pty below.
+LOCAL_TARGETS = {"local-copy", "local-switch", "local-copy-switch",
+                 "local-u2f-register", "local-u2f-register-backup", "local-u2f-check"}
 PROFILE_KEYS = ["NIXNAME", "NIXADDR", "NIXPORT", "NIXUSER", "NIXHDD", "LUKS", "SSH_KEY", "JUMP", "JUMP_PORT", "JUMP_KEY"]
 # Always imported by a new host; the rest of modules/services are role checkboxes.
 BASE_MODULES = {"server-base", "topology", "secrets", "mesh", "monitoring-agent", "backup", "internal-dns"}
@@ -149,6 +165,19 @@ def check_conn(c):
             "JUMP": jump, "JUMP_PORT": check_port(c.get("JUMP_PORT")), "JUMP_KEY": check_key(c.get("JUMP_KEY"))}
 
 
+def check_local_conn(c):
+    """Validated make variables for a local-* target: no address/key/jump, this machine is the target."""
+    name = str(c.get("NIXNAME", ""))
+    if not NAME_RE.match(name) or not (HOSTS / name / "configuration.nix").exists():
+        raise BadRequest("unknown host config")
+    user = str(c.get("NIXUSER") or "lpj")
+    if not USER_RE.match(user):
+        raise BadRequest("invalid user")
+    # synthetic NIXADDR="local" so Job/summary/busy-check need no special-casing
+    # — and it keys the busy-check on "this machine", not a particular host.
+    return {"NIXNAME": name, "NIXUSER": user, "NIXADDR": "local"}
+
+
 def auth_of(conn, body):
     """Secrets for askpass from the request body; askpass.sh tells jump prompts apart by key path/user@host."""
     return {"DEPLOY_SSH_PASSWORD": body.get("password") or "",
@@ -194,7 +223,7 @@ def run_quick(argv, auth=None, stdin=None, timeout=60):
 # ---------- jobs ----------
 
 class Job:
-    def __init__(self, target, conn, extra, auth):
+    def __init__(self, target, conn, extra, auth, local=False):
         self.id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
         self.target, self.conn, self.extra = target, conn, extra
         self.started = datetime.datetime.now().isoformat(timespec="seconds")
@@ -207,8 +236,26 @@ class Job:
         LOGS.mkdir(exist_ok=True)
         self.logfile = LOGS / f"{self.id}-{conn['NIXNAME']}-{target}.log"
         kwargs = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
-        self.proc = subprocess.Popen(argv, cwd=REPO, env=ssh_env(auth), stdin=subprocess.PIPE,
-                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0, **kwargs)
+        # local-switch's `sudo` only prompts when it sees a real tty — remote
+        # targets get that for free from the Makefile's `ssh -tt` (the *remote*
+        # side allocates the pty); here there is no ssh in between, so give the
+        # child our own local pty instead of a plain pipe.
+        self.master_fd = None
+        if local and pty is not None:
+            self.master_fd, slave_fd = pty.openpty()
+            # start_new_session=True (setsid) runs before preexec_fn, but a
+            # pty only becomes the *controlling* terminal of that new session
+            # once something explicitly claims it — plain fd inheritance isn't
+            # enough. Without this, sudo's own open("/dev/tty") fails with
+            # ENXIO ("a terminal is required to read the password") even
+            # though stdin is already a tty-type fd.
+            self.proc = subprocess.Popen(argv, cwd=REPO, env=ssh_env(auth), stdin=slave_fd,
+                                         stdout=slave_fd, stderr=slave_fd,
+                                         preexec_fn=lambda: fcntl.ioctl(0, termios.TIOCSCTTY, 0), **kwargs)
+            os.close(slave_fd)
+        else:
+            self.proc = subprocess.Popen(argv, cwd=REPO, env=ssh_env(auth), stdin=subprocess.PIPE,
+                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0, **kwargs)
         self.append(f"+ {self.cmdline}\n")
         threading.Thread(target=self.pump, daemon=True).start()
 
@@ -220,11 +267,22 @@ class Job:
             f.write(text)
 
     def pump(self):
-        while True:
-            data = self.proc.stdout.read(4096)
-            if not data:
-                break
-            self.append(data.decode("utf-8", errors="replace"))
+        if self.master_fd is not None:
+            while True:
+                try:
+                    data = os.read(self.master_fd, 4096)
+                except OSError:  # pty raises EIO once the child side closes, not an empty read
+                    break
+                if not data:
+                    break
+                self.append(data.decode("utf-8", errors="replace"))
+            os.close(self.master_fd)
+        else:
+            while True:
+                data = self.proc.stdout.read(4096)
+                if not data:
+                    break
+                self.append(data.decode("utf-8", errors="replace"))
         rc = self.proc.wait()
         self.ended = datetime.datetime.now().isoformat(timespec="seconds")
         self.append(f"\n[exit code {rc}]\n")
@@ -235,8 +293,11 @@ class Job:
     def send(self, text):
         if self.rc is None:
             try:
-                self.proc.stdin.write((text + "\n").encode())
-                self.proc.stdin.flush()
+                if self.master_fd is not None:
+                    os.write(self.master_fd, (text + "\n").encode())
+                else:
+                    self.proc.stdin.write((text + "\n").encode())
+                    self.proc.stdin.flush()
             except OSError:
                 pass
 
@@ -257,7 +318,8 @@ def start_job(body):
     target = body.get("target")
     if target not in TARGETS:
         raise BadRequest("target not allowed")
-    conn = check_conn(body.get("conn", {}))
+    local = target in LOCAL_TARGETS
+    conn = check_local_conn(body.get("conn", {})) if local else check_conn(body.get("conn", {}))
     extra = {}
     if target == "set-password":
         user = str(body.get("user", ""))
@@ -273,7 +335,8 @@ def start_job(body):
         busy = [j for j in JOBS.values() if j.rc is None and j.conn["NIXADDR"] == conn["NIXADDR"]]
         if busy:
             raise BadRequest(f"a job for {conn['NIXADDR']} is still running ({busy[0].id})")
-        job = Job(target, conn, extra, auth_of(conn, body))
+        auth = None if local else auth_of(conn, body)
+        job = Job(target, conn, extra, auth, local=local)
         JOBS[job.id] = job
     return job.summary()
 

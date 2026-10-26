@@ -208,3 +208,82 @@ local-switch:
 
 local-copy-switch: local-copy local-switch
 
+# FIDO2/U2F key registration for $(NIXUSER) in ~/.config/Yubico/u2f_keys —
+# README.md §7. Each register target verifies its own write (grep + awk
+# field count) and prints OK/NOT OK before exiting, so a failed touch or a
+# bad write doesn't silently look like success.
+u2f-register:
+	ssh -tt $(SSH_OPTIONS) -p$(NIXPORT) $(NIXUSER)@$(NIXADDR) " \
+		set -e; mkdir -p ~/.config/Yubico; \
+		nix-shell -p pam_u2f --run 'pamu2fcfg > ~/.config/Yubico/u2f_keys'; \
+		f=~/.config/Yubico/u2f_keys; \
+		line=\$$(grep \"^$(NIXUSER):\" \"\$$f\" || true); \
+		[ -n \"\$$line\" ] || { echo 'NOT OK: no entry written to u2f_keys'; exit 1; }; \
+		n=\$$(echo \"\$$line\" | awk -F: '{print NF-1}'); \
+		echo \"OK: \$$n key(s) registered for $(NIXUSER)\" \
+	"
+
+# Appends a second (backup) key onto the *same* line, not a new one — pam_u2f
+# only reads the first matching line per user, so a second line would
+# silently never be checked. Run u2f-register first.
+u2f-register-backup:
+	ssh -tt $(SSH_OPTIONS) -p$(NIXPORT) $(NIXUSER)@$(NIXADDR) " \
+		set -e; f=~/.config/Yubico/u2f_keys; \
+		[ -s \"\$$f\" ] || { echo 'NOT OK: no key registered yet - run make u2f-register first'; exit 1; }; \
+		extra=\$$(nix-shell -p pam_u2f --run 'pamu2fcfg -n'); \
+		content=\$$(cat \"\$$f\"); \
+		printf '%s:%s\n' \"\$$content\" \"\$$extra\" > \"\$$f\"; \
+		line=\$$(grep \"^$(NIXUSER):\" \"\$$f\"); \
+		n=\$$(echo \"\$$line\" | awk -F: '{print NF-1}'); \
+		echo \"OK: \$$n key(s) registered for $(NIXUSER)\" \
+	"
+
+# Re-run the same verification standalone, without writing anything.
+u2f-check:
+	ssh $(SSH_OPTIONS) -p$(NIXPORT) $(NIXUSER)@$(NIXADDR) " \
+		f=~/.config/Yubico/u2f_keys; \
+		[ -s \"\$$f\" ] || { echo 'NOT OK: u2f_keys missing or empty'; exit 1; }; \
+		line=\$$(grep \"^$(NIXUSER):\" \"\$$f\" || true); \
+		[ -n \"\$$line\" ] || { echo 'NOT OK: no entry for $(NIXUSER) in u2f_keys'; exit 1; }; \
+		n=\$$(echo \"\$$line\" | awk -F: '{print NF-1}'); \
+		echo \"OK: \$$n key(s) registered for $(NIXUSER)\" \
+	"
+
+# Same three, run directly on this machine (no ssh) — use when sitting at
+# the target itself, e.g. galaxy-book. "~" and pamu2fcfg's username both
+# resolve to whoever is actually running `make`, never to NIXUSER — so all
+# three refuse up front if NIXUSER doesn't match that, instead of writing
+# under the wrong name (or wrong $HOME) and failing confusingly afterward.
+local-u2f-register:
+	@actual=$$(whoami); \
+	[ "$(NIXUSER)" = "$$actual" ] || { echo "NOT OK: running as $$actual, but NIXUSER=$(NIXUSER) - set NIXUSER=$$actual for local targets, or use u2f-register over ssh logged in as $(NIXUSER)"; exit 1; }; \
+	set -e; mkdir -p ~/.config/Yubico; \
+	nix-shell -p pam_u2f --run "pamu2fcfg > ~/.config/Yubico/u2f_keys"; \
+	f=~/.config/Yubico/u2f_keys; \
+	line=$$(grep "^$(NIXUSER):" "$$f" || true); \
+	[ -n "$$line" ] || { echo "NOT OK: no entry written to u2f_keys"; exit 1; }; \
+	n=$$(echo "$$line" | awk -F: '{print NF-1}'); \
+	echo "OK: $$n key(s) registered for $(NIXUSER)"
+
+local-u2f-register-backup:
+	@actual=$$(whoami); \
+	[ "$(NIXUSER)" = "$$actual" ] || { echo "NOT OK: running as $$actual, but NIXUSER=$(NIXUSER) - set NIXUSER=$$actual for local targets, or use u2f-register-backup over ssh logged in as $(NIXUSER)"; exit 1; }; \
+	set -e; f=~/.config/Yubico/u2f_keys; \
+	[ -s "$$f" ] || { echo "NOT OK: no key registered yet - run make local-u2f-register first"; exit 1; }; \
+	extra=$$(nix-shell -p pam_u2f --run "pamu2fcfg -n"); \
+	content=$$(cat "$$f"); \
+	printf '%s:%s\n' "$$content" "$$extra" > "$$f"; \
+	line=$$(grep "^$(NIXUSER):" "$$f"); \
+	n=$$(echo "$$line" | awk -F: '{print NF-1}'); \
+	echo "OK: $$n key(s) registered for $(NIXUSER)"
+
+local-u2f-check:
+	@actual=$$(whoami); \
+	[ "$(NIXUSER)" = "$$actual" ] || { echo "NOT OK: running as $$actual, but NIXUSER=$(NIXUSER) - set NIXUSER=$$actual to check that user's own u2f_keys"; exit 1; }; \
+	f=~/.config/Yubico/u2f_keys; \
+	[ -s "$$f" ] || { echo "NOT OK: u2f_keys missing or empty"; exit 1; }; \
+	line=$$(grep "^$(NIXUSER):" "$$f" || true); \
+	[ -n "$$line" ] || { echo "NOT OK: no entry for $(NIXUSER) in u2f_keys"; exit 1; }; \
+	n=$$(echo "$$line" | awk -F: '{print NF-1}'); \
+	echo "OK: $$n key(s) registered for $(NIXUSER)"
+

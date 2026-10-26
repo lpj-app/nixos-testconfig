@@ -76,7 +76,9 @@
 
       <nav class="tabs" role="tablist">
         <button class="tab active" data-tab="deploy">Deploy</button>
+        <button class="tab" data-tab="local">Local</button>
         <button class="tab" data-tab="install">Install VM</button>
+        <button class="tab" data-tab="u2f">U2F</button>
         <button class="tab" data-tab="newhost">New host</button>
         <button class="tab" data-tab="mesh">Mesh &amp; keys</button>
         <button class="tab" data-tab="status">Status</button>
@@ -97,6 +99,20 @@
           <button class="btn" data-run="test">test</button>
         </div>
         <p class="hint">Answer prompts (e.g. <code>sudo</code>) in the log below.</p>
+      </div>
+
+      <div class="card panel" id="tab-local" hidden>
+        <h2>Local copy &amp; switch</h2>
+        <p>Runs <code>make local-copy</code> / <code>local-switch</code> directly on <strong>this</strong> machine —
+          no address, SSH key or password needed, just the host config (and SSH user, for which
+          <code>users/&lt;user&gt;</code> gets copied) from "Connection" above. Use this when the deployment tool
+          itself is running on the target, e.g. the laptop you're sitting at right now.</p>
+        <div class="row">
+          <button class="btn primary" data-run="local-copy-switch">local-copy-switch</button>
+          <button class="btn" data-run="local-copy">local-copy only</button>
+          <button class="btn" data-run="local-switch">local-switch only</button>
+        </div>
+        <p class="hint">local-switch's <code>sudo</code> password prompt appears in the log below, same as a remote switch.</p>
       </div>
 
       <div class="card panel" id="tab-install" hidden>
@@ -139,6 +155,27 @@
             <div class="row"><button class="btn primary" data-run="copy-switch">copy-switch</button></div>
           </li>
         </ol>
+      </div>
+
+      <div class="card panel" id="tab-u2f" hidden>
+        <h2>Hardware 2FA (YubiKey/OnlyKey)</h2>
+        <p>Writes/verifies a FIDO2 credential for <code>NIXUSER</code> in
+          <code>~/.config/Yubico/u2f_keys</code> (README.md §7). Touch the key on
+          prompt; each run prints <code>OK: N key(s)</code> or <code>NOT OK</code>.</p>
+        <div class="row">
+          <button class="btn primary" data-run="u2f-register">Register key</button>
+          <button class="btn" data-run="u2f-register-backup">Register backup key</button>
+          <button class="btn" data-run="u2f-check">Check registration</button>
+        </div>
+        <p class="hint">Remote, over SSH — key must be plugged into the target host, not this machine.</p>
+        <p class="hint">Local variants (no SSH, runs on this machine): set <strong>SSH user</strong> above to
+          whoever is actually running this tool (e.g. <code>lpj</code>, not the default <code>root</code>) — they
+          write to that OS user's own <code>~</code>, and refuse if NIXUSER doesn't match it.</p>
+        <div class="row">
+          <button class="btn primary" data-run="local-u2f-register">local-u2f-register</button>
+          <button class="btn" data-run="local-u2f-register-backup">local-u2f-register-backup</button>
+          <button class="btn" data-run="local-u2f-check">local-u2f-check</button>
+        </div>
       </div>
 
       <form class="card panel" id="tab-newhost" hidden autocomplete="off">
